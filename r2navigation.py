@@ -25,15 +25,19 @@ import cmath
 import time
 
 # constants
-rotatechange = 0.1
-speedchange = 0.05
+rotatechange = 0.5
+speedchange = 0.15
 occ_bins = [-1, 0, 100, 101]
-stop_distance = 0.25
 front_angle = 30
 front_angles = range(-front_angle,front_angle+1,1)
 scanfile = 'lidar.txt'
 mapfile = 'map.txt'
+isNFCDetected = False
+isDoneLoading = False
+isTargetDetected = False
+isDoneShooting = False
 stopping_time_in_seconds = 540
+
 
 # code from https://automaticaddison.com/how-to-convert-a-quaternion-into-euler-angles-in-python/
 def euler_from_quaternion(x, y, z, w):
@@ -105,7 +109,7 @@ class AutoNav(Node):
             'nfc_status',
             self.nfc_callback,
             10)
-        self.nfc_subscription
+        self.nfc_subscription # prevent unused variable warning
         
         
         # Create a subscriber to messages from the targeting node
@@ -154,12 +158,15 @@ class AutoNav(Node):
 
 
     def nfc_callback(self, msg):
-        global isTargetDetected, isDoneShooting
+        global isNFCDetected, isDoneLoading
         self.get_logger().info('In nfc_callback')
         #self.get_logger().info('I heard: "%s"' % msg.data)
-        if (msg.data == 'Detected'):
+        if (msg.data == 'DetectedNFC'):
             print('NFC Detected')
             isNFCDetected = True
+        elif (msg.data == 'DoneLoading'):
+            print('Is Done Loading')
+            isDoneLoading = True
         else:
             print('No NFC Detected')
             isNFCDetected = False
@@ -169,14 +176,12 @@ class AutoNav(Node):
         global isTargetDetected, isDoneShooting
         self.get_logger().info('In target_callback')
         self.get_logger().info('I heard: "%s"' % msg.data)
-        if (msg.data == 'Detected'):
+        if (msg.data == 'DetectedTarget'):
             print('Target Detected')
             isTargetDetected = True
-            isDoneShooting = False
-        elif (msg.data == 'Done'):
+        elif (msg.data == 'DoneShooting'):
             print('Is Done shooting')
             isDoneShooting = True
-            isTargetDetected = False
         else:
             print('No Target Detected')
             isTargetDetected = False
@@ -373,9 +378,7 @@ class AutoNav(Node):
             # start right wall following logic
             self.pick_direction()
             
-            runNFC = True
-            runLauncher = False
-
+            
             while rclpy.ok():
                 if self.laser_range.size != 0:
                     elapsed_time = time.time() - start_time
@@ -393,7 +396,10 @@ class AutoNav(Node):
                             print('In mover, nfc detected.')
                             rclpy.spin_once(self)
                         break
-                        
+                # allow the callback functions to run
+                rclpy.spin_once(self)
+              
+            
               while rclpy.ok():
                 if self.laser_range.size != 0:
                     elapsed_time = time.time() - start_time
@@ -404,25 +410,18 @@ class AutoNav(Node):
                     # while there is no target detected, keep picking direction (do wall follow)
                     if not isTargetDetected:
                         self.pick_direction()
-
-                    # when there is target detected, stop the bot and stop wall following logic
-                    # until it finish shooting at the target.
-                    # Then set isTargetDetected to False to resume the wall following logic
-
                     else:
                         self.stopbot()
                         while (not isDoneShooting):
                             print('In mover, target detected.')
                             rclpy.spin_once(self)
-                        break
+                        isTargetDetected = False
 
                 # allow the callback functions to run
                 rclpy.spin_once(self)
-                
-          ###    NEED A WAY TO KEEP THE   ###
-          ### ROBOT MOVING AFTER SHOOTING ###
                
-
+               
+                
         except Exception as e:
             print(e)
         
