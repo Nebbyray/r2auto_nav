@@ -33,6 +33,7 @@ front_angle = 30
 front_angles = range(-front_angle,front_angle+1,1)
 scanfile = 'lidar.txt'
 mapfile = 'map.txt'
+stopping_time_in_seconds = 540
 
 # code from https://automaticaddison.com/how-to-convert-a-quaternion-into-euler-angles-in-python/
 def euler_from_quaternion(x, y, z, w):
@@ -96,8 +97,26 @@ class AutoNav(Node):
             qos_profile_sensor_data)
         self.scan_subscription  # prevent unused variable warning
         self.laser_range = np.array([])
-
-
+        
+        
+        # Create a subscriber to messages from the nfc node
+        self.nfc_subscription = self.create_subscription(
+            String,
+            'nfc_status',
+            self.nfc_callback,
+            10)
+        self.nfc_subscription
+        
+        
+        # Create a subscriber to messages from the targeting node
+        self.targeting_subscription = self.create_subscription(
+            String,
+            'targeting_status',
+            self.target_callback,
+            10)
+        self.targeting_subscription  # prevent unused variable warning
+        
+ 
     def odom_callback(self, msg):
         # self.get_logger().info('In odom_callback')
         orientation_quat =  msg.pose.pose.orientation
@@ -134,6 +153,35 @@ class AutoNav(Node):
         self.laser_range[self.laser_range==0] = np.nan
 
 
+    def nfc_callback(self, msg):
+        global isTargetDetected, isDoneShooting
+        self.get_logger().info('In nfc_callback')
+        #self.get_logger().info('I heard: "%s"' % msg.data)
+        if (msg.data == 'Detected'):
+            print('NFC Detected')
+            isNFCDetected = True
+        else:
+            print('No NFC Detected')
+            isNFCDetected = False
+            
+            
+    def target_callback(self, msg):
+        global isTargetDetected, isDoneShooting
+        self.get_logger().info('In target_callback')
+        self.get_logger().info('I heard: "%s"' % msg.data)
+        if (msg.data == 'Detected'):
+            print('Target Detected')
+            isTargetDetected = True
+            isDoneShooting = False
+        elif (msg.data == 'Done'):
+            print('Is Done shooting')
+            isDoneShooting = True
+            isTargetDetected = False
+        else:
+            print('No Target Detected')
+            isTargetDetected = False
+            
+            
     # function to rotate the TurtleBot
     def rotatebot(self, rot_angle):
         # self.get_logger().info('In rotatebot')
@@ -189,6 +237,95 @@ class AutoNav(Node):
 
 
     def pick_direction(self):
+        self.get_logger().info('In pick direction:')
+        print(self.laser_range[0])
+        print(self.laser_range[45])
+        print(self.laser_range[315])
+        
+        self.front_dist = np.nan_to_num(
+            self.laser_range[0], copy=False, nan=100)
+        self.leftfront_dist = np.nan_to_num(
+            self.laser_range[45], copy=False, nan=100)
+        self.rightfront_dist = np.nan_to_num(
+            self.laser_range[315], copy=False, nan=100)
+
+        self.get_logger().info('Front Distance: %s' % str(self.front_dist))
+        self.get_logger().info('Front Left Distance: %s' % str(self.leftfront_dist))
+        self.get_logger().info('Front Right Distance: %s' % str(self.rightfront_dist))
+
+        # Logic for following the wall
+        # >d means no wall detected by that laser beam
+        # <d means a wall was detected by that laser beam
+        d = 0.28  # wall distance from the robot. It will follow the right wall and maintain this distance
+        # Set turning speeds (to the left) in rad/s
+
+        # These values were determined by trial and error.
+        self.turning_speed_wf_fast = 0.75  # Fast turn ideal = 1.0
+        self.turning_speed_wf_slow = 0.40  # Slow turn = 0.50
+        # Set movement speed
+        self.forward_speed = speedchange
+        # Set up twist message as msg
+        msg = Twist()
+        msg.linear.x = 0.0
+        msg.linear.y = 0.0
+        msg.linear.z = 0.0
+        msg.angular.x = 0.0
+        msg.angular.y = 0.0
+        msg.angular.z = 0.0
+
+        
+        
+        
+        if self.leftfront_dist > d and self.front_dist > d and self.rightfront_dist > d:
+            self.wall_following_state = "search for wall"
+            msg.linear.x = self.forward_speed
+            msg.angular.z = -self.turning_speed_wf_slow  # turn right to find wall
+
+        elif self.leftfront_dist > d and self.front_dist < d and self.rightfront_dist > d:
+            self.wall_following_state = "turn left"
+            msg.angular.z = self.turning_speed_wf_fast
+
+        elif (self.leftfront_dist > d and self.front_dist > d and self.rightfront_dist < d):
+            if (self.rightfront_dist < 0.25):
+                # Getting too close to the wall
+                self.wall_following_state = "turn left"
+                msg.linear.x = self.forward_speed
+                msg.angular.z = self.turning_speed_wf_fast
+            else:
+                # Go straight ahead
+                self.wall_following_state = "follow wall"
+                msg.linear.x = self.forward_speed
+
+        elif self.leftfront_dist < d and self.front_dist > d and self.rightfront_dist > d:
+            self.wall_following_state = "search for wall"
+            msg.linear.x = self.forward_speed
+            msg.angular.z = -self.turning_speed_wf_slow  # turn right to find wall
+
+        elif self.leftfront_dist > d and self.front_dist < d and self.rightfront_dist < d:
+            self.wall_following_state = "turn left"
+            msg.angular.z = self.turning_speed_wf_fast
+
+        elif self.leftfront_dist < d and self.front_dist < d and self.rightfront_dist > d:
+            self.wall_following_state = "turn left"
+            msg.angular.z = self.turning_speed_wf_fast
+
+        elif self.leftfront_dist < d and self.front_dist < d and self.rightfront_dist < d:
+            self.wall_following_state = "turn left"
+            msg.angular.z = self.turning_speed_wf_fast
+
+        elif self.leftfront_dist < d and self.front_dist > d and self.rightfront_dist < d:
+            self.wall_following_state = "search for wall"
+            msg.linear.x = self.forward_speed
+            msg.angular.z = -self.turning_speed_wf_slow  # turn right to find wall
+
+        else:
+            pass
+
+        # Send velocity command to the robot
+        self.publisher_.publish(msg)
+        
+        
+        
         # self.get_logger().info('In pick_direction')
         if self.laser_range.size != 0:
             # use nanargmax as there are nan's in laser_range added to replace 0's
@@ -223,32 +360,68 @@ class AutoNav(Node):
 
 
     def mover(self):
+        global myoccdata, isTargetDetected, isDoneShooting
         try:
+            while (self.laser_range.size == 0):
+                print("Spin to get a valid lidar data")
+                rclpy.spin_once(self)
+            
             # initialize variable to write elapsed time to file
-            # contourCheck = 1
+            contourCheck = 1
+            start_time = time.time()
 
-            # find direction with the largest distance from the Lidar,
-            # rotate to that direction, and start moving
+            # start right wall following logic
             self.pick_direction()
+            
+            runNFC = True
+            runLauncher = False
 
             while rclpy.ok():
                 if self.laser_range.size != 0:
-                    # check distances in front of TurtleBot and find values less
-                    # than stop_distance
-                    lri = (self.laser_range[front_angles]<float(stop_distance)).nonzero()
-                    # self.get_logger().info('Distances: %s' % str(lri))
-
-                    # if the list is not empty
-                    if(len(lri[0])>0):
-                        # stop moving
-                        self.stopbot()
-                        # find direction with the largest distance from the Lidar
-                        # rotate to that direction
-                        # start moving
-                        self.pick_direction()
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > stopping_time_in_seconds:
+                        print("Specified time has passed. Automatically shutting down.")
+                        break
                     
+                    # while there is no nfc detected, keep picking direction (do wall follow)
+                    
+                    if not isNFCDetected:
+                        self.pick_direction()
+                    else:
+                        self.stopbot()
+                        while (not isDoneLoading):
+                            print('In mover, nfc detected.')
+                            rclpy.spin_once(self)
+                        break
+                        
+              while rclpy.ok():
+                if self.laser_range.size != 0:
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > stopping_time_in_seconds:
+                        print("Specified time has passed. Automatically shutting down.")
+                        break
+
+                    # while there is no target detected, keep picking direction (do wall follow)
+                    if not isTargetDetected:
+                        self.pick_direction()
+
+                    # when there is target detected, stop the bot and stop wall following logic
+                    # until it finish shooting at the target.
+                    # Then set isTargetDetected to False to resume the wall following logic
+
+                    else:
+                        self.stopbot()
+                        while (not isDoneShooting):
+                            print('In mover, target detected.')
+                            rclpy.spin_once(self)
+                        break
+
                 # allow the callback functions to run
                 rclpy.spin_once(self)
+                
+          ###    NEED A WAY TO KEEP THE   ###
+          ### ROBOT MOVING AFTER SHOOTING ###
+               
 
         except Exception as e:
             print(e)
@@ -265,9 +438,6 @@ def main(args=None):
     auto_nav = AutoNav()
     auto_nav.mover()
 
-    # create matplotlib figure
-    # plt.ion()
-    # plt.show()
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
