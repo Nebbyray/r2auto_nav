@@ -75,7 +75,7 @@ class ThermalCamera(Node):
 
             if detected == True:
                 # Communicate with wallfollower to stop working
-                message_sent = 'Detected'
+                message_sent = 'DetectedTarget'
                 self.timer_callback()
                 print(" ")
                 print("DETECTED!!")
@@ -259,7 +259,7 @@ class ThermalCamera(Node):
         # Do the cleanup #
         # -------------- #
         # Send message that the target has finished shooting
-        message_sent = 'Done'
+        message_sent = 'DoneShooting'
         self.timer_callback()
 
         # Stop the DC Motor
