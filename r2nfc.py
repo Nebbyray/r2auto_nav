@@ -86,7 +86,7 @@ class NFC(Node):
         # -------------- #
         # Send message that the robot has been loaded
         
-        message_sent = 'Done'
+        message_sent = 'DoneLoading'
         self.timer_callback()
 
         # Cleanup all GPIO
