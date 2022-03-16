@@ -186,7 +186,7 @@ class AutoNav(Node):
             print('No Target Detected')
             isTargetDetected = False
             
-            
+"""            
     # function to rotate the TurtleBot
     def rotatebot(self, rot_angle):
         # self.get_logger().info('In rotatebot')
@@ -239,7 +239,7 @@ class AutoNav(Node):
         twist.angular.z = 0.0
         # stop the rotation
         self.publisher_.publish(twist)
-
+"""
 
     def pick_direction(self):
         self.get_logger().info('In pick direction:')
@@ -329,31 +329,8 @@ class AutoNav(Node):
         # Send velocity command to the robot
         self.publisher_.publish(msg)
         
-        
-        
-        # self.get_logger().info('In pick_direction')
-        if self.laser_range.size != 0:
-            # use nanargmax as there are nan's in laser_range added to replace 0's
-            lr2i = np.nanargmax(self.laser_range)
-            self.get_logger().info('Picked direction: %d %f m' % (lr2i, self.laser_range[lr2i]))
-        else:
-            lr2i = 0
-            self.get_logger().info('No data!')
-
-        # rotate to that direction
-        self.rotatebot(float(lr2i))
-
-        # start moving
-        self.get_logger().info('Start moving')
-        twist = Twist()
-        twist.linear.x = speedchange
-        twist.angular.z = 0.0
-        # not sure if this is really necessary, but things seem to work more
-        # reliably with this
-        time.sleep(1)
-        self.publisher_.publish(twist)
-
-
+       
+    
     def stopbot(self):
         self.get_logger().info('In stopbot')
         # publish to cmd_vel to move TurtleBot
@@ -365,7 +342,7 @@ class AutoNav(Node):
 
 
     def mover(self):
-        global myoccdata, isTargetDetected, isDoneShooting
+        global isNFCDetected,isDoneLoading,isTargetDetected, isDoneShooting
         try:
             while (self.laser_range.size == 0):
                 print("Spin to get a valid lidar data")
