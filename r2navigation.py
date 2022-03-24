@@ -25,9 +25,9 @@ import math
 import cmath
 import time
 
-import cv2
 import tf2_ros
 from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
+import cv2
 
 # constants
 rotatechange = 0.5
@@ -35,18 +35,24 @@ speedchange = 0.15
 
 front_angle = 30
 front_angles = range(-front_angle,front_angle+1,1)
+back_angles = range(150, 210 + 1, 1)
 
-myoccdata = np.array([])
-occ_bins = [-1, 0, 100, 101]
 scanfile = 'lidar.txt'
 mapfile = 'map.txt'
+myoccdata = np.array([])
+occ_bins = [-1, 0, 100, 101]
 map_bg_color = 1
 
 isNFCDetected = False
 isDoneLoading = False
 isTargetDetected = False
 isDoneShooting = False
-stopping_time_in_seconds = 540
+
+# To change before starting test
+stopping_time_in_seconds = 540  # 9 minutes
+initial_direction = "Front"  # "Front", "Left", "Right", "Back"
+
+
 
 
 # code from https://automaticaddison.com/how-to-convert-a-quaternion-into-euler-angles-in-python/
@@ -70,19 +76,19 @@ def euler_from_quaternion(x, y, z, w):
     t4 = +1.0 - 2.0 * (y * y + z * z)
     yaw_z = math.atan2(t3, t4)
 
-    return roll_x, pitch_y, yaw_z # in radians
+    return roll_x, pitch_y, yaw_z  # in radians
+
 
 class AutoNav(Node):
 
     def __init__(self):
         super().__init__('auto_nav')
-        
+
         # create publisher for moving TurtleBot
-        self.publisher_ = self.create_publisher(Twist,'cmd_vel',10)
+        self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
         # self.get_logger().info('Created publisher')
-        
-        
-        
+
+
         # create subscription to track orientation
         self.odom_subscription = self.create_subscription(
             Odometry,
@@ -95,9 +101,7 @@ class AutoNav(Node):
         self.roll = 0
         self.pitch = 0
         self.yaw = 0
-        
-        
-        
+
         # create subscription to track occupancy
         self.occ_subscription = self.create_subscription(
             OccupancyGrid,
@@ -106,10 +110,7 @@ class AutoNav(Node):
             qos_profile_sensor_data)
         self.occ_subscription  # prevent unused variable warning
         self.occdata = np.array([])
-        
-        
-        
-        
+
         # create subscription to track lidar
         self.scan_subscription = self.create_subscription(
             LaserScan,
@@ -118,10 +119,11 @@ class AutoNav(Node):
             qos_profile_sensor_data)
         self.scan_subscription  # prevent unused variable warning
         self.laser_range = np.array([])
+        self.tfBuffer = tf2_ros.Buffer()
+        self.tfListener = tf2_ros.TransformListener(self.tfBuffer, self)
         
         
-        
-        # Create a subscriber to messages from the nfc node
+        # create subscription to messages from the nfc node
         self.nfc_subscription = self.create_subscription(
             String,
             'nfc_status',
@@ -130,15 +132,15 @@ class AutoNav(Node):
         self.nfc_subscription # prevent unused variable warning
         
         
-        # Create a subscriber to messages from the targeting node
+        
+        # create subscription to messages from the targeting node
         self.targeting_subscription = self.create_subscription(
             String,
             'targeting_status',
             self.target_callback,
             10)
         self.targeting_subscription  # prevent unused variable warning
-        
-        
+
         
         # Create a subscriber
         # This node subscribes to messages of type Float64MultiArray
@@ -155,15 +157,18 @@ class AutoNav(Node):
             10)
         self.subscription  # prevent unused variable warning
         
- 
-    def odom_callback(self, msg):
-        # self.get_logger().info('In odom_callback')
-        orientation_quat =  msg.pose.pose.orientation
-        self.roll, self.pitch, self.yaw = euler_from_quaternion(orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w)
+        
+        
 
+    def odom_callback(self, msg):
+        self.get_logger().info('In odom_callback')
+        orientation_quat = msg.pose.pose.orientation
+        self.roll, self.pitch, self.yaw = euler_from_quaternion(
+            orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w)
 
     def occ_callback(self, msg):
-        # self.get_logger().info('In occ_callback')
+        global myoccdata
+        self.get_logger().info('In occ_callback')
         # create numpy array
         msgdata = np.array(msg.data)
         # compute histogram to identify percent of bins with -1
@@ -177,21 +182,29 @@ class AutoNav(Node):
         oc2 = msgdata + 1
         # reshape to 2D array using column order
         # self.occdata = np.uint8(oc2.reshape(msg.info.height,msg.info.width,order='F'))
-        self.occdata = np.uint8(oc2.reshape(msg.info.height,msg.info.width))
-        # print to file
-        # np.savetxt(mapfile, self.occdata)
+        try:
+            trans = self.tfBuffer.lookup_transform(
+                'map', 'base_link', rclpy.time.Time())
+        except (LookupException, ConnectivityException, ExtrapolationException) as e:
+            self.get_logger().info('No transformation found')
+            return
+        self.occdata = np.uint8(oc2.reshape(msg.info.height, msg.info.width))
+        myoccdata = np.uint8(oc2.reshape(msg.info.height, msg.info.width))
+        odata = myoccdata
+        np.savetxt(mapfile, self.occdata)
 
-
+        
     def scan_callback(self, msg):
         # self.get_logger().info('In scan_callback')
         # create numpy array
         self.laser_range = np.array(msg.ranges)
         # print to file
-        # np.savetxt(scanfile, self.laser_range)
+        np.savetxt(scanfile, self.laser_range)
         # replace 0's with nan
-        self.laser_range[self.laser_range==0] = np.nan
+        self.laser_range[self.laser_range == 0] = np.nan
+        
 
-
+        
     def nfc_callback(self, msg):
         global isNFCDetected, isDoneLoading
         self.get_logger().info('In nfc_callback')
@@ -206,7 +219,7 @@ class AutoNav(Node):
             print('No NFC Detected')
             isNFCDetected = False
             
-            
+    
     def target_callback(self, msg):
         global isTargetDetected, isDoneShooting
         self.get_logger().info('In target_callback')
@@ -214,15 +227,15 @@ class AutoNav(Node):
         if (msg.data == 'DetectedTarget'):
             print('Target Detected')
             isTargetDetected = True
+            isDoneShooting = False
         elif (msg.data == 'DoneShooting'):
             print('Is Done shooting')
             isDoneShooting = True
+            isTargetDetected = False
         else:
             print('No Target Detected')
             isTargetDetected = False
-            
-            
-            
+
             
     def state_estimate_callback(self, msg):
         """
@@ -234,27 +247,27 @@ class AutoNav(Node):
         curr_state = msg.data
         self.current_x = curr_state[0]
         self.current_y = curr_state[1]
-        self.current_yaw = curr_state[2]  
-        
+        self.current_yaw = curr_state[2]        
             
-"""            
+            
     # function to rotate the TurtleBot
+
     def rotatebot(self, rot_angle):
         # self.get_logger().info('In rotatebot')
         # create Twist object
         twist = Twist()
-        
+
         # get current yaw angle
         current_yaw = self.yaw
         # log the info
         self.get_logger().info('Current: %f' % math.degrees(current_yaw))
         # we are going to use complex numbers to avoid problems when the angles go from
         # 360 to 0, or from -180 to 180
-        c_yaw = complex(math.cos(current_yaw),math.sin(current_yaw))
+        c_yaw = complex(math.cos(current_yaw), math.sin(current_yaw))
         # calculate desired yaw
         target_yaw = current_yaw + math.radians(rot_angle)
         # convert to complex notation
-        c_target_yaw = complex(math.cos(target_yaw),math.sin(target_yaw))
+        c_target_yaw = complex(math.cos(target_yaw), math.sin(target_yaw))
         self.get_logger().info('Desired: %f' % math.degrees(cmath.phase(c_target_yaw)))
         # divide the two complex numbers to get the change in direction
         c_change = c_target_yaw / c_yaw
@@ -277,7 +290,7 @@ class AutoNav(Node):
             rclpy.spin_once(self)
             current_yaw = self.yaw
             # convert the current yaw to complex form
-            c_yaw = complex(math.cos(current_yaw),math.sin(current_yaw))
+            c_yaw = complex(math.cos(current_yaw), math.sin(current_yaw))
             # self.get_logger().info('Current Yaw: %f' % math.degrees(current_yaw))
             # get difference in angle between current and target
             c_change = c_target_yaw / c_yaw
@@ -290,11 +303,11 @@ class AutoNav(Node):
         twist.angular.z = 0.0
         # stop the rotation
         self.publisher_.publish(twist)
-"""
 
+        
+        
     def pick_direction(self):
         self.get_logger().info('In pick direction:')
-        
         self.front_dist = np.nan_to_num(
             self.laser_range[0], copy=False, nan=100)
         self.leftfront_dist = np.nan_to_num(
@@ -326,9 +339,6 @@ class AutoNav(Node):
         msg.angular.y = 0.0
         msg.angular.z = 0.0
 
-        
-        
-        
         if self.leftfront_dist > d and self.front_dist > d and self.rightfront_dist > d:
             self.wall_following_state = "search for wall"
             msg.linear.x = self.forward_speed
@@ -376,9 +386,7 @@ class AutoNav(Node):
 
         # Send velocity command to the robot
         self.publisher_.publish(msg)
-        
-       
-    
+
     def stopbot(self):
         self.get_logger().info('In stopbot')
         # publish to cmd_vel to move TurtleBot
@@ -388,6 +396,37 @@ class AutoNav(Node):
         # time.sleep(1)
         self.publisher_.publish(twist)
 
+    def initialmove(self):
+        self.get_logger().info('In initialmove, move backwards')
+        # publish to cmd_vel to move TurtleBot
+        if initial_direction == "Back":
+            self.get_logger().info("Going back")
+        elif initial_direction == "Right":
+            self.get_logger().info("Going right")
+            self.rotatebot(90)
+        elif initial_direction == "Left":
+            self.get_logger().info("Going right")
+            self.rotatebot(-90)
+        elif initial_direction == "Front":
+            self.get_logger().info("Going Forward")
+            self.rotatebot(180)
+        twist = Twist()
+        twist.linear.x = -speedchange
+        twist.angular.z = 0.0
+        lrback = (self.laser_range[back_angles] < float(
+            0.40)).nonzero()
+        self.publisher_.publish(twist)
+        while len(lrback[0]) <= 0:
+            time.sleep(1)
+            twist.linear.x = -speedchange
+            twist.angular.z = 0.0
+            rclpy.spin_once(self)
+            lrback = (self.laser_range[back_angles] < float(
+                0.40)).nonzero()
+            self.publisher_.publish(twist)
+        self.stopbot()
+        self.rotatebot(-90)
+        self.stopbot()
 
     def closure(self):
         # This function checks if mapdata contains a closed contour. The function
@@ -447,12 +486,13 @@ class AutoNav(Node):
             return True
         else:
             return False
-    
-    
-    
+
     def mover(self):
         global myoccdata, isNFCDetected, isDoneLoading, isTargetDetected, isDoneShooting
         try:
+            rclpy.spin_once(self)
+
+            # ensure that we have a valid lidar data before we start wall follow logic
             while (self.laser_range.size == 0):
                 print("Spin to get a valid lidar data")
                 rclpy.spin_once(self)
@@ -461,7 +501,10 @@ class AutoNav(Node):
             contourCheck = 1
             start_time = time.time()
 
-            # start right wall following logic
+            # initial move to find the appropriate wall to follow
+            self.initialmove()
+            
+            # start wall follow logic
             self.pick_direction()
             
             
@@ -485,33 +528,42 @@ class AutoNav(Node):
                         break
                 # allow the callback functions to run
                 rclpy.spin_once(self)
-              
-            
-              while rclpy.ok():
+                
+                
+
+            while rclpy.ok():
                 if self.laser_range.size != 0:
-                    
+
                     if contourCheck and len(myoccdata) != 0:
                         print("Inside contourCheck:")
                         if self.closure():
                             self.stopbot()
                             print("Inside selfclosure contourcheck:")
+                            # map is complete, so save current time into file
                             with open("maptime.txt", "w") as f:
                                 f.write("Elapsed Time: " + str(time.time() - start_time))
                                 contourCheck = 0
-                                cv2.imwrite('mazemap.png', myoccdata)
-                                print("Map is complete!")
+                            # save the map
+                            cv2.imwrite('mazemap.png', myoccdata)
+                            print("Map is complete!")
                             if isDoneShooting:
                                 print("I'm done shooting and my map is complete!")
                                 break
-                    
+
                     elapsed_time = time.time() - start_time
                     if elapsed_time > stopping_time_in_seconds:
-                        print("Specified time has passed. Automatically shutting down.")
+                        print(
+                            "Specified time has passed. Automatically shutting down.")
                         break
 
                     # while there is no target detected, keep picking direction (do wall follow)
                     if not isTargetDetected:
                         self.pick_direction()
+
+                    # when there is target detected, stop the bot and stop wall following logic
+                    # until it finish shooting at the target.
+                    # Then set isTargetDetected to False to resume the wall following logic
+
                     else:
                         self.stopbot()
                         while (not isDoneShooting):
@@ -521,16 +573,16 @@ class AutoNav(Node):
 
                 # allow the callback functions to run
                 rclpy.spin_once(self)
-               
-               
-                
+
         except Exception as e:
             print(e)
-        
+
         # Ctrl-c detected
         finally:
             # stop moving
             self.stopbot()
+            # save map
+            cv2.imwrite('mazemapfinally.png', myoccdata)
 
 
 def main(args=None):
@@ -538,7 +590,6 @@ def main(args=None):
 
     auto_nav = AutoNav()
     auto_nav.mover()
-
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
