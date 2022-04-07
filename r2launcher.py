@@ -13,9 +13,7 @@ rotatechange = 0.1
 speedchange = 0.05
 detecting_threshold = 32.0
 firing_threshold = 35.0
-servo_pin = 14
-MotorL_pin = 
-MotorR_pin = 
+Motor_pin = 19
 
 
 message_sent = 'Not Detected'
@@ -95,8 +93,6 @@ class ThermalCamera(Node):
 
         # Centre the target in the robot's vision
         GPIO.setmode(GPIO.BCM)
-        horizontally_centered = False
-        vertically_centered = False
         centered = False
 
         while not centered:
@@ -112,82 +108,26 @@ class ThermalCamera(Node):
                         max_column = column
                         max_value = current_value
 
-            if not horizontally_centered:
-                # centre max value between row 3 and 4
-                if max_column < 3:
-                    # spin it anti-clockwise
-                    twist = Twist()
-                    twist.linear.x = 0.0
-                    twist.angular.z = rotatechange
-                    time.sleep(1)
-                    self.publisher_.publish(twist)
-                    time.sleep(1)
-                elif max_column > 4:
-                    # spin it clockwise
-                    twist = Twist()
-                    twist.linear.x = 0.0
-                    twist.angular.z = -1 * rotatechange
-                    time.sleep(1)
-                    self.publisher_.publish(twist)
-                    time.sleep(1)
-                else:
-                    horizontally_centered = True
+            if max_column < 3:
+                # spin it anti-clockwise
+                twist = Twist()
+                twist.linear.x = 0.0
+                twist.angular.z = rotatechange
+                time.sleep(1)
+                self.publisher_.publish(twist)
+                time.sleep(1)
+            elif max_column > 4:
+                # spin it clockwise
+                twist = Twist()
+                twist.linear.x = 0.0
+                twist.angular.z = -1 * rotatechange
+                time.sleep(1)
+                self.publisher_.publish(twist)
+                time.sleep(1)
+            else:
+                centered = True
 
                 self.stopbot()
-
-            if horizontally_centered and not vertically_centered:
-                # centre max value between row 3 and 4
-                if max_row < 3:
-                    # shift the servo up by 5 degrees (limit:0)
-                    try:
-                        servo_pin = 4
-
-                        GPIO.setup(servo_pin, GPIO.OUT)
-
-                        p = GPIO.PWM(servo_pin, 50)
-
-                        p.start(2.5)
-
-                        degree = 0
-
-                        servo_value = degree/90 * 5 + 2.5
-                        p.ChangeDutyCle(servo_value)
-                        time.sleep(1)
-                    except:
-                        p.stop()
-                        GPIO.cleanup()
-                    finally:
-                        p.stop()
-                        GPIO.cleanup()
-
-                elif max_row > 4:
-                    # shift the servo down by 5 degrees (limit: 20)
-                    try:
-                        servo_pin = 4
-
-                        GPIO.setup(servo_pin, GPIO.OUT)
-
-                        p = GPIO.PWM(servo_pin, 50)
-
-                        p.start(2.5)
-
-                        degree = 20
-
-                        servo_value = degree/90 * 5 + 2.5
-                        p.ChangeDutyCle(servo_value)
-                        time.sleep(1)
-                    except:
-                        p.stop()
-                        GPIO.cleanup()
-                    finally:
-                        p.stop()
-                        GPIO.cleanup()
-
-                else:
-                    vertically_centered = True
-
-            if horizontally_centered and vertically_centered:
-                centered = True
 
             return True
 
@@ -231,25 +171,12 @@ class ThermalCamera(Node):
         GPIO.setmode(GPIO.BCM)
         
         # Setup DC motors
-        GPIO.setup(MotorL_pin, GPIO.OUT)
-        GPIO.setup(MotorR_pin, GPIO.OUT)
+        GPIO.setup(Motor_pin, GPIO.OUT)
         self.get_logger().info("Setup the DC")
 
-        # Setup servo motor
-        GPIO.setup(servo_pin, GPIO.OUT)
-        p = GPIO.PWM(servo_pin, 50)
-        p.start(0)
-        
-        time.sleep(5)
-
         # Spin Backwards Continuously
-        GPIO.output(MotorL_pin, True)
-        GPIO.output(MotorR_pin, True)
+        GPIO.output(Motor_pin, True)
         self.get_logger().info("Started the DC Motor")
-        
-        # Move the servo arm lock
-        p.ChangeDutyCycle(75)
-        GPIO.output(servo_pin, True)
         
         # Wait for all balls to be shot
         time.sleep(10)
@@ -263,11 +190,9 @@ class ThermalCamera(Node):
         self.timer_callback()
 
         # Stop the DC Motor
-        GPIO.output(MotorL_pin, False)
-        GPIO.output(MotorR_pin, False)
+        GPIO.output(Motor_pin, False)
         self.get_logger().info("Stopped the DC Motor")
-        p.stop()
-
+        
         # Cleanup all GPIO
         GPIO.cleanup()
         self.get_logger().info("Cleaned up GPIO")
