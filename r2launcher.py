@@ -1,45 +1,44 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Int8, Bool, String
+from std_msgs.msg import String
 import time
-import busio
-import board
-import adafruit_amg88xx
 import RPi.GPIO as GPIO
+import board
+import busio
+from digitalio import DigitalInOut
+from adafruit_pn532.i2c import PN532_I2C
+
 
 # constants
 rotatechange = 0.1
 speedchange = 0.05
-detecting_threshold = 32.0
-firing_threshold = 35.0
-Motor_pin = 19
-
-
 message_sent = 'Not Detected'
 
-# Set up Thermal Camera
+
+
+# Set up NFC reader
 i2c = busio.I2C(board.SCL, board.SDA)
-amg = adafruit_amg88xx.AMG88XX(i2c)
+reset_pin = DigitalInOut(board.D6)
+req_pin = DigitalInOut(board.D12)
+pn532 = PN532_I2C(i2c, debug=False, reset=reset_pin, req=req_pin)
 
 
-class ThermalCamera(Node):
+class NFC(Node):
     def __init__(self):
-        super().__init__('thermalcamera')
+        super().__init__('nfc')
         self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
-        # Set up publisher 'targeting_status' to communicate with wallfollower
-        self.publisher_targeting = self.create_publisher(
-            String, 'targeting_status', 10)
-        timer_period = 0.5  # seconds
+        self.nfc_pub = self.create_publisher(String, 'nfc_status', 10)
+        self.get_logger().info('Created NFC publisher')
+        timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.i = 0
 
-    # targeting_status callback function to stop wallfollower logic when target is detected
     def timer_callback(self):
         global message_sent
         msg = String()
         msg.data = message_sent
-        self.publisher_targeting.publish(msg)
+        self.nfc_pub.publish(msg)
         self.get_logger().info('Publishing: "%s"' % msg.data)
         self.i += 1
 
@@ -49,166 +48,65 @@ class ThermalCamera(Node):
         twist.angular.z = 0.0
         self.publisher_.publish(twist)
 
-    def find_target(self):
 
-        # See if target found
+    def find_nfc(self):
+        pn532.SAM_configuration()
         global message_sent
-        target_found = False
+        nfc_found = False
 
-        # -------------------------------------------------------------------------- #
-        # While target has not been found, run this code to check if target is found #
-        # -------------------------------------------------------------------------- #
-        while not target_found:
+        while not nfc_found:
             detected = False
-
-            for row in amg.pixels:
-                print('[', end=" ")
-                for temp in row:
-                    if temp > detecting_threshold:
-                        detected = True
-                        target_found = True
-                    print("{0:.1f}".format(temp), end=" ")
-                print("]")
-                print("\n")
+            # Check if a card is available to read
+            uid = pn532.read_passive_target(timeout=0.5)
+            print('.', end="")
+            if uid is not None:
+                detected = True
+                nfc_found = True
 
             if detected == True:
-                # Communicate with wallfollower to stop working
-                message_sent = 'DetectedTarget'
+                message_sent = 'DetectedNFC'
                 self.timer_callback()
-                print(" ")
-                print("DETECTED!!")
-                print("]")
-                print("\n")
+                self.get_logger().info('Found card with UID')
                 time.sleep(1)
 
         # If target is found, stop movement
         self.stopbot()
-
         return True
+                
 
-    def centre_target(self):
-        # ----------------------------------------------------------- #
-        # Adjust the servo and robot until high temp is in the centre #
-        # ----------------------------------------------------------- #
-
-        # Centre the target in the robot's vision
-        GPIO.setmode(GPIO.BCM)
-        centered = False
-
-        while not centered:
-            screen = amg.pixels
-            max_row = 0
-            max_column = 0
-            max_value = 0.0
-            for row in range(len(screen)):
-                for column in range(len(screen[row])):
-                    current_value = screen[row][column]
-                    if current_value > max_value:
-                        max_row = row
-                        max_column = column
-                        max_value = current_value
-
-            if max_column < 3:
-                # spin it anti-clockwise
-                twist = Twist()
-                twist.linear.x = 0.0
-                twist.angular.z = rotatechange
-                time.sleep(1)
-                self.publisher_.publish(twist)
-                time.sleep(1)
-            elif max_column > 4:
-                # spin it clockwise
-                twist = Twist()
-                twist.linear.x = 0.0
-                twist.angular.z = -1 * rotatechange
-                time.sleep(1)
-                self.publisher_.publish(twist)
-                time.sleep(1)
-            else:
-                centered = True
-
-                self.stopbot()
-
-            return True
-
-    def move_to_target(self):
-        # move to the object in increments
-        twist = Twist()
-        twist.linear.x = speedchange
-        twist.angular.z = 0.0
-        self.publisher_.publish(twist)
-        time.sleep(1)
-        self.stopbot()
-
-    def firing_time(self):
-        screen = amg.pixels
-        for row in [3, 4]:
-            for column in [3, 4]:
-                if screen[row][column] > firing_threshold:
-                    return True
-
-    def targetting(self):
+    def detecting(self):
         global message_sent
 
-        # find the target
-        self.find_target()
-
-        # centre the target
-        self.centre_target()
-
-        # --------------------------------------------------- #
-        # Now it is centered, start moving towards the target #
-        # --------------------------------------------------- #
-
-        while not self.firing_time():
-            self.move_to_target()
-            self.centre_target()
-
-        # ----------------------------- #
-        # Now the bot can fire the ball #
-        # ----------------------------- #
-
-        GPIO.setmode(GPIO.BCM)
+        # find the nfc
+        self.find_nfc()
         
-        # Setup DC motors
-        GPIO.setup(Motor_pin, GPIO.OUT)
-        self.get_logger().info("Setup the DC")
-
-        # Spin Backwards Continuously
-        GPIO.output(Motor_pin, True)
-        self.get_logger().info("Started the DC Motor")
-        
-        # Wait for all balls to be shot
         time.sleep(10)
-        
 
         # -------------- #
         # Do the cleanup #
         # -------------- #
-        # Send message that the target has finished shooting
-        message_sent = 'DoneShooting'
+        # Send message that the robot has been loaded
+        
+        message_sent = 'DoneLoading'
+        self.get_logger().info("Done Loading")
         self.timer_callback()
 
-        # Stop the DC Motor
-        GPIO.output(Motor_pin, False)
-        self.get_logger().info("Stopped the DC Motor")
-        
         # Cleanup all GPIO
         GPIO.cleanup()
         self.get_logger().info("Cleaned up GPIO")
-
+    
 
 def main(args=None):
     rclpy.init(args=args)
-
-    thermalcamera = ThermalCamera()
-    thermalcamera.targetting()
-
+    
+    nfc = NFC()
+    nfc.detecting()
+    
+    
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    thermalcamera.destroy_node()
-
+    nfc.destroy_node()
     rclpy.shutdown()
 
 
