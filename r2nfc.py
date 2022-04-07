@@ -4,23 +4,24 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 import time
 import RPi.GPIO as GPIO
-from pn532 import *
+import board
+import busio
+from digitalio import DigitalInOut
+from adafruit_pn532.i2c import PN532_I2C
+
 
 # constants
 rotatechange = 0.1
 speedchange = 0.05
 message_sent = 'Not Detected'
 
+
+
 # Set up NFC reader
-#pn532 = PN532_SPI(debug=False, reset=20, cs=4)
-pn532 = PN532_I2C(debug=False, reset=20, req=16)
-#pn532 = PN532_UART(debug=False, reset=20)
-
-ic, ver, rev, support = pn532.get_firmware_version()
-print('Found PN532 with firmware version: {0}.{1}'.format(ver, rev))
-
-# Configure PN532 to communicate with MiFare cards
-pn532.SAM_configuration()
+i2c = busio.I2C(board.SCL, board.SDA)
+reset_pin = DigitalInOut(board.D6)
+req_pin = DigitalInOut(board.D12)
+pn532 = PN532_I2C(i2c, debug=False, reset=reset_pin, req=req_pin)
 
 
 class NFC(Node):
@@ -49,12 +50,12 @@ class NFC(Node):
 
 
     def find_nfc(self):
+        pn532.SAM_configuration()
         global message_sent
         nfc_found = False
 
         while not nfc_found:
             detected = False
-            
             # Check if a card is available to read
             uid = pn532.read_passive_target(timeout=0.5)
             print('.', end="")
@@ -65,7 +66,7 @@ class NFC(Node):
             if detected == True:
                 message_sent = 'DetectedNFC'
                 self.timer_callback()
-                print('Found card with UID', [hex(i) for i in uid])
+                self.get_logger().info('Found card with UID')
                 time.sleep(1)
 
         # If target is found, stop movement
@@ -79,7 +80,7 @@ class NFC(Node):
         # find the nfc
         self.find_nfc()
         
-        time.sleep(30)
+        time.sleep(10)
 
         # -------------- #
         # Do the cleanup #
@@ -87,6 +88,7 @@ class NFC(Node):
         # Send message that the robot has been loaded
         
         message_sent = 'DoneLoading'
+        self.get_logger().info("Done Loading")
         self.timer_callback()
 
         # Cleanup all GPIO
