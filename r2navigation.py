@@ -177,11 +177,11 @@ class AutoNav(Node):
         global isTargetDetected, isDoneShooting
         self.get_logger().info('In target_callback')
         self.get_logger().info('I heard: "%s"' % msg.data)
-        if (msg.data == 'Detected'):
+        if (msg.data == 'DetectedTarget'):
             print('Target Detected')
             isTargetDetected = True
             isDoneShooting = False
-        elif (msg.data == 'Done'):
+        elif (msg.data == 'DoneShooting'):
             print('Is Done shooting')
             isDoneShooting = True
             isTargetDetected = False
@@ -449,7 +449,7 @@ class AutoNav(Node):
             #self.initialmove()
             # start wall follow logic
             self.pick_direction()
-
+            
             while rclpy.ok():
                 if self.laser_range.size != 0:
                     
@@ -470,7 +470,7 @@ class AutoNav(Node):
                         break
                 # allow the callback functions to run
                 rclpy.spin_once(self) 
-            
+
             while rclpy.ok():
                 if self.laser_range.size != 0:
 
@@ -490,7 +490,7 @@ class AutoNav(Node):
 
                     else:
                         self.stopbot()
-                        while (not isDoneShooting):
+                        while not isDoneShooting:
                             print('In mover, target detected.')
                             rclpy.spin_once(self)
                         isTargetDetected = False
