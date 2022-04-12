@@ -100,16 +100,21 @@ class ThermalCamera(Node):
             max_row = 0
             max_column = 0
             max_value = 0.0
+            
+            for row in amg.pixels:
+                print('[', end=" ")
+                for temp in row:
+                    print("{0:.1f}".format(temp), end=" ")
+                print("]")
+                print("\n")
+            
             for row in range(len(screen)):
                 for column in range(len(screen[row])):
                     current_value = screen[row][column]
-                    print("{0:.1f}".format(column), end=" ")
                     if current_value > max_value:
                         max_row = row
                         max_column = column
                         max_value = current_value
-                print("]")
-                print("\n")
 
             if max_column < 3:
                 # spin it anti-clockwise
